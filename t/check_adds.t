@@ -15,7 +15,8 @@ print "Test was: $cmd\n" if ($?);
 $t += ok $str, '/^check_adds/';
 
 my ($proxy, $account, $proxy_pass, $stuff) ;
-do 'Nagios_WebTransact_cache.pl' ;
+
+require 't/Nagios_WebTransact_cache.pl' ;
 
 if ( $proxy && $account && $proxy_pass ) {
   $cmd = "perl -Mblib t/check_adds.pl -P $proxy -A $account -p $proxy_pass" ;

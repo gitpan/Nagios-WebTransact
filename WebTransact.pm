@@ -3,7 +3,7 @@ package Nagios::WebTransact;
 use strict;
 use vars qw($VERSION) ;
 
-$VERSION = '0.02';
+$VERSION = '0.03';
 
 use HTTP::Request::Common qw(GET POST HEAD) ;
 use HTTP::Cookies ;

@@ -16,7 +16,7 @@ $t += ok $str, '/^check_atmoss_new_conn/';
 
 my ($proxy, $account, $proxy_pass, $stuff) ;
 
-do 'Nagios_WebTransact_cache.pl' ;
+require 't/Nagios_WebTransact_cache.pl' ;
 
 if ( $proxy && $account && $proxy_pass ) {
   $cmd = "perl -Mblib t/check_atmoss_new_conn.pl -P $proxy -A $account -p $proxy_pass" ;

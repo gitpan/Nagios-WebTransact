@@ -3,7 +3,6 @@ MANIFEST
 README
 Makefile.PL
 WebTransact.pm
-test.pl
 t/check_adds.pl
 t/check_atmoss_new_conn.pl
 t/check_adds.t
