@@ -3,7 +3,7 @@ package Nagios::WebTransact;
 use strict;
 use vars qw($VERSION) ;
 
-$VERSION = '0.14';
+$VERSION = '0.16';
 
 use HTTP::Request::Common qw(GET POST HEAD) ;
 use HTTP::Cookies ;
@@ -124,23 +124,27 @@ sub check {
 
   my %parms = (%defaults, @_) ;
 					# remaining (minus first 2) elts in @_ are the check params such as debug
-
-  my (%downloaded, $ua) ; 
+  my (%downloaded, $ua, $debug, $ok, $indent_level, $resp_string, $res) ; 
 
   keys %downloaded = 128 ;
- 
-  $ua = new LWP::UserAgent ;
-  $ua->agent($parms{agent}) ;
-  $ua->timeout($parms{timeout}) ;
-  $ua->cookie_jar(HTTP::Cookies->new)
-    if $parms{cookies} ;
-  $ua->proxy(['http', 'ftp'] => $parms{proxy}{server})
-    if exists $parms{proxy}{server} ;
 
-  my $debug = $parms{debug} ;
-  my $ok = $parms{fail_if_1} ? TRUE : FALSE ; 
-  my $indent_level = $parms{indent_level} ;
-  my ($resp_string, $res) ;
+  $debug = $parms{debug} ;
+  $ok = $parms{fail_if_1} ? TRUE : FALSE ; 
+  $indent_level = $parms{indent_level} ;
+
+  unless ( exists $self->{ua} ) { 
+    $ua = new LWP::UserAgent ;
+    $ua->agent($parms{agent}) ;
+    $ua->timeout($parms{timeout}) ;
+    $ua->cookie_jar(HTTP::Cookies->new)
+      if $parms{cookies} ;
+    $ua->proxy(['http', 'ftp'] => $parms{proxy}{server})
+      if exists $parms{proxy}{server} ;
+  
+    $self->{ua} = $ua ;
+  } else {
+    $ua = $self->{ua} ;
+  }
 
   foreach my $url_r ( @{ $self->{urls} } ) {
 
@@ -280,6 +284,8 @@ sub make_req {
     if ($query_string) {
       chop($query_string) ;
       $req = GET $url .  '?' . $query_string ;
+						# Referer header seemingly not necessary
+      # $req = GET $url .  '?' . $query_string, Referer => $self->{urls}[0]{Url} ;
     } else {
       $req = GET $url ;
     }
@@ -301,7 +307,7 @@ sub next_url {
 						# FIXME. Some applications (eg IIS module for
 						# SAP R3) have an action field relative to
 						# hostname.
-						# Others (eg ADDS v2) have use a refresh header with
+						# Others (eg ADDS v2) use a refresh header
 						# relative to hostname/path ..
 
   if ( $resp_string =~ m#META\s+http-equiv="refresh"\s+content="\d+;\s+url=([^"]+)"# ) {
@@ -475,59 +481,72 @@ Exp_Fault field the check fails.
     ($rc, $message) = $web_trx->check({}, debug => 0, proxy => { Server => 'http://Foo:3128', Account => 'lu$er', Pass => '00##00' } ) ;
     print $rc ? 'Adds Ok: ' : 'Adds b0rked: ', $message ;
 
-This example checks if a complete ATMOSS transaction is successfull by getting a sequence
-of URLs, checking the content where the Qs_fixed and Qs_var fields are non null generating
-a query string for the request.
+This example checks if a complete ATMOSS transaction is successfull by requesting a sequence
+of URLs and  checking the content against the Exp and Exp_Fault fields. Where the Qs_fixed and Qs_var fields are non null,
+the corresponding Query String is generated for the URL.
 
-For example, the POST request for 'http://external/atmoss/Falcon.Result' is accompanied by
-the query string p_tmno1 = <current_value_of_arg_hash{'tmno'}>
+For example, the POST request for 'http://Perciles.IPAustralia/atmoss/Falcon.Result' is accompanied by
+the query string, S<p_tm_number_list=<current_value_of_arg_hash{'tmno'}>
 
     #!/usr/local/bin/perl -w
     
     use Nagios::WebTransact;
 
-    use constant Intro              => 'http://Pericles.IPAustralia.Gov.AU/atmoss/falcon.application_start' ;
-    use constant ConnectToSearch    => 'http://Pericles.IPAustralia.Gov.AU/atmoss/Falcon_Users_Cookies.Define_User' ;
-    use constant MultiSessConn      => 'http://Pericles.IPAustralia.Gov.AU/atmoss/Falcon_Users_Cookies.Run_Create' ;
-    use constant Search             => 'http://Pericles.IPAustralia.Gov.AU/atmoss/Falcon.Result' ;
-    use constant ResultAbstract     => 'http://Pericles.IPAustralia.Gov.AU/atmoss/falcon_details.show_tm_details' ;
-    use constant ResultDetails      => 'http://Pericles.IPAustralia.Gov.AU/atmoss/Falcon_Details.Show_TM_Details' ;
-    use constant DeleteSearches     => 'http://Pericles.IPAustralia.Gov.AU/atmoss/Falcon_Searches.Delete_All_Searches' ;
+    my $Proxy = {} ;
+    $Proxy = { server => "http://$proxy/" } if $proxy ;
+    $Proxy->{account} = $account  if $account ;
+    $Proxy->{pass}    = $pass     if $pass ;
     
-    use constant Int                => 'Welcome to ATMOSS' ;
-    use constant ConnSrch           => 'Connect to Trade Mark Search' ;
-    use constant MltiSess           => 'Fill in one or more of the fields below' ;
-    use constant Srch               => 'Your search request retrieved\s+\d+\s+match(es)?' ;
-    use constant ResAbs             => 'Trade Mark\s+:\s+\d+' ;
-    use constant ResDet             => ResAbs ;
-    use constant DelSrch            => MltiSess ;
+    my $Intro               = 'http://Pericles.IPAustralia.Gov.AU/atmoss/falcon.application_start' ;
+    my $MultiSessConn       = 'http://Pericles.IPAustralia.Gov.AU/atmoss/Falcon_Users_Cookies.Run_Create' ;
+    my $Search              = 'http://Pericles.IPAustralia.Gov.AU/atmoss/Falcon.Result' ;
+    my $ResultDetails       = 'http://Pericles.IPAustralia.Gov.AU/atmoss/Falcon_Details.Show_TM_Details' ;
+    my $SrchList            = 'http://Pericles.IPAustralia.Gov.AU/atmoss/Falcon_Searches.List_Search' ;
+    my $DelSrchLists        = 'http://Pericles.IPAustralia.Gov.AU/atmoss/Falcon_Searches.SubmitChoice' ;
+    my $EndSession          = 'http://Pericles.IPAustralia.Gov.AU/atmoss/Falcon_Users_Cookies.clear_User' ;
     
-    use constant MSC_f              => [p_Anon => 'REGISTERED', p_user_type => 'Connect to Existing Extract List', p_extID => 'Foo', p_password => 'Bar'] ;
-    use constant Srch_v             => [p_tmno1 => 'tmno'] ;
-    use constant RA_v               => [p_tm_number => 'tmno'] ;
-    use constant RA_f               => [p_detail => 'QUICK', p_rec_all => 1, p_rec_no => 1, p_search_no => 1, p_ExtDisp => 'D'] ;
-    use constant RD_v               => RA_v ;
-    use constant RD_f               => [p_Detail => 'DETAILED', p_rec_no => 1, p_search_no => 1,  p_ExtDisp => 'D'];
+    my $Int                 = 'Welcome to ATMOSS' ;
+    my $ConnSrch            = 'Connect to Trade Mark Search' ;
+    my $MltiSess            = 'Fill in one or more of the fields below' ;
+    my $Srch                = 'Your search request retrieved\s+\d+\s+match(es)?' ;
+    my $ResSum              = 'Trade Mark\s+:\s+\d+' ;
+    my $ResDet              = 'Indexing Details' ;
+    my $SrchLs              = 'Search List' ;
     
-    use constant OraFault           => 'We were unable to process your request at this time' ;
+    my $MSC_f               = [p_Anon => 'ANONYMOUS', p_user_type => 'Enter as Guest', p_JS => 'N'] ;
     
-    use constant URLS               => [
-      {Method => 'GET',  Url => Intro,           Qs_var => [],      Qs_fixed => [], Exp => Int,     Exp_Fault => OraFault},
-      {Method => 'GET',  Url => ConnectToSearch, Qs_var => [],      Qs_fixed => [], Exp => ConnSrch,Exp_Fault => OraFault},
-      {Method => 'POST', Url => MultiSessConn,   Qs_var => [],      Qs_fixed => MSC_f,Exp => MltiSess,Exp_Fault => OraFault},
-      {Method => 'POST', Url => Search,          Qs_var => Srch_v,  Qs_fixed => [], Exp => Srch,    Exp_Fault => OraFault},
-      {Method => 'GET',  Url => ResultAbstract,  Qs_var => RA_v,    Qs_fixed => RA_f, Exp => ResAbs,Exp_Fault => OraFault},
-      {Method => 'POST', Url => ResultDetails,   Qs_var => RD_v,    Qs_fixed => RD_f, Exp => ResDet,Exp_Fault => OraFault},
-      {Method => 'POST', Url => DeleteSearches,  Qs_var => [],      Qs_fixed => [], Exp => DelSrch, Exp_Fault => OraFault},
-            ] ;
-
+    my $Srch_v              = [p_tm_number_list => 'tmno'] ;
+    
+    my $RD_v                = [p_tm_number => 'tmno'] ;
+    my $RD_f                = [p_Detail => 'DETAILED', p_search_no => 0];
+    my $DAS_f               = [p_CmbDelete => 1, p_Button => 'Delete All Searches', p_extID => 'ANONYMOUS', p_password => '', p_CmbDisplay => 1, 
+                               p_CmbRefine => 1, p_CmbCombine1 => 1, p_CmbCombineOperator => 'INTERSECT', p_CmbCombine2 => 1, p_search_used => 0 ] ;
+    
+    my $OraFault            = 'We were unable to process your request at this time' ;
+    
+    my @URLS                = (
+      {Method => 'GET',  Url => $Intro,           Qs_var => [],     Qs_fixed => [],    Exp => $Int,     Exp_Fault => $OraFault},
+      {Method => 'POST', Url => $MultiSessConn,   Qs_var => [],     Qs_fixed => $MSC_f,Exp => $MltiSess,Exp_Fault => $OraFault},
+      {Method => 'POST', Url => $Search,          Qs_var => $Srch_v,Qs_fixed => [],    Exp => $ResSum,  Exp_Fault => $OraFault},
+      {Method => 'GET',  Url => $ResultDetails,   Qs_var => $RD_v,  Qs_fixed => $RD_f, Exp => $ResDet,  Exp_Fault => $OraFault},
+      {Method => 'GET',  Url => $SrchList,        Qs_var => [],     Qs_fixed => [],    Exp => $SrchLs,  Exp_Fault => $OraFault},
+      {Method => 'POST', Url => $DelSrchLists,    Qs_var => [],     Qs_fixed => $DAS_f,Exp => $MltiSess,Exp_Fault => $OraFault},
+      {Method => 'GET',  Url => $EndSession,      Qs_var => [],     Qs_fixed => [],    Exp => $Int,     Exp_Fault => $OraFault},
+            ) ;
+    
+    my (@tmarks, $tmno, $i) ;
+    
     @tmarks = @ARGV ? @ARGV : (3, 100092, 200099, 300006, 400075, 500067, 600076, 700066, 800061) ;
     $i = @ARGV == 1 ? 0 : int( rand($#tmarks) + 0.5 ) ;
     $tmno = $tmarks[$i] ;
+    
+    my $x = Nagios::WebTransact->new( \@URLS ) ;
+    my ($rc, $message) =  $x->check( {tmno => $tmno}, debug => $debug, proxy => $Proxy, download_images => $download_images ) ;
+    
+    print $rc ? 'ATMOSS Ok. ' : 'ATMOSS b0rked: ', $message, "\n" ; 
 
-    $x = Nagios::WebTransact->new( URLS ) ;
-    ($rc, $message) =  $x->check( {tmno => $tmno}, debug => $debug, proxy => { Server => 'http://Foo:3128', Account => 'lu$ser', Pass => '00##00' } ) 
-    print $rc ? 'ATMOSS Ok: ' : 'ATMOSS b0rked: ', $message ;
+
+Complete examples can be found in the t/ directory of the distribution.
 
 
 =head1 CONSTRUCTOR
@@ -633,12 +652,35 @@ B<timeout> the default wait time for a response - to a request for B<one> page -
 B<download_images> get the images found by HTML::LinkExtor in the page, provided those
 images have not already been fetched.
 
+B<agent> the default value of the User-Agent field in the HTTP request is Mozilla/4.7.
+
 B<CGI_VALUES> is a reference to a hash whose keys are the values used in the
 Qs_var lists. This allows the check method to get the value of these 
 variables at run time (useful if you want to generate web parameters in
 your program, using a random number generator for example [vs]).
 
 This hash ref is B<required> and must be set to {} if there are B<no> variables.
+
+=item matches([ match1, match2, ..])
+
+Accessor to set or get the value of the matches field.
+
+=item urls([ ( { Method => , Url => , Qs_var => , Qs_fixed, Exp => , Exp_Fault => } .. ) ])
+
+Accessor to get or set or the urls field. Useful for changing the set of pages to be checked for
+a subsequent conditional check (eg if first transaction, do a second with this set of pages).
+
+Optional argument is a ref to a list of hashes like that used by the constructor.
+
+=item set_urls, get_urls
+
+Synonym for urls method.
+
+=item set_matches, get_matches
+
+Synonym for matches method.
+
+=back
 
 =head1 BUGS
 

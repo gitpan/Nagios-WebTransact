@@ -21,3 +21,15 @@ what has been done here ie
 0.14	Nov 2003
 	- closure generated accessors 
  	- add download_images option
+
+0.15	Cache UserAgent in object making it possible to reuse the object ($x->urls([({Method =>,..})]))
+	with a different set of pages.
+
+	Obviously the object design is completely unsatisfactory: constructor should cache UserAgent;
+	check() should take the list of pages and check them.
+
+0.16	Mar 2004 XXXX
+	1 Unnecessary change to default AGENT value 
+	2 allow redirect for POST. This breaks the check_sap* clients.
+
+	==> backout and document the agent keyword of the check method.
