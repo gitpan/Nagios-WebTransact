@@ -8,7 +8,8 @@
 
 BEGIN { $| = 1; print "1..3\n"; }
 END {print "not ok 1\n" unless $loaded;}
-use Nagios::Web_Trx;
+
+use Nagios::WebTransact;
 $loaded = 1;
 print "ok 1\n";
 
@@ -22,7 +23,7 @@ use Test::Harness;
 
 my ($proxy, $account, $proxy_pass, $stuff) ;
 
-unless ( -s 't/Nagios_Web_Trx_cache.pl' ) {
+unless ( -s 't/Nagios-WebTransact-cache.pl' ) {
   print "If you access the Internet with a proxy server, please enter the Proxy details when prompted. Skip otherwise.\n" ;
   print "Please enter the name of any required Proxy server [if necessary for Internet access]. Include a suffix of ':<port>' if port is not 80: " ;
   chomp( $proxy = <STDIN> ) ;
@@ -36,7 +37,7 @@ unless ( -s 't/Nagios_Web_Trx_cache.pl' ) {
   $stuff = '$proxy      = ' . "'$proxy'"      . ' ;' . "\n" .
            '$account    = ' . "'$account'"    . ' ;' . "\n" .
            '$proxy_pass = ' . "'$proxy_pass'" . ' ;' . "\n" ;
-  open(CACHE, '> t/Nagios_Web_Trx_cache.pl') or die "Can't open .t/Nagios_Web_Trx_cache.pl for output: $!" ;
+  open(CACHE, '> t/Nagios-WebTransact-cache.pl') or die "Can't open .t/Nagios-WebTransact-cache.pl for output: $!" ;
   print CACHE $stuff ;
   close CACHE ;
 } ;
