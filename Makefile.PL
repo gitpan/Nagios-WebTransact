@@ -23,6 +23,7 @@ unless ( -s 't/Nagios_WebTransact_cache.pl' ) {
 } ;
 
 WriteMakefile(
+    'PREREQ_PM' => { 'LWP' => 0, 'HTTP::Cookies' => 0 },
     'NAME'	=> 'Nagios::WebTransact',
     'VERSION_FROM' => 'WebTransact.pm', # finds $VERSION
 );

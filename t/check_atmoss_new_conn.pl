@@ -5,10 +5,14 @@ $PROGNAME = 'check_atmoss_new_conn.pl' ;
 use Nagios::WebTransact;
 
 use Getopt::Long ;
+
+Getopt::Long::Configure('bundling', 'no_ignore_case') ;
+
 GetOptions
         (
         "h|help"        => \&print_usage,
         "d|debug"       => \$debug,
+        "d|download_images"       => \$download_images,
         "P|proxy:s"     => \$proxy,
         "A|account:s"   => \$account,
         "p|pass:s"      => \$pass,
@@ -59,7 +63,7 @@ $i = @ARGV == 1 ? 0 : int( rand($#tmarks) + 0.5 ) ;
 $tmno = $tmarks[$i] ;
 
 $x = Nagios::WebTransact->new( URLS ) ;
-($rc, $message) =  $x->check( {tmno => $tmno}, debug => $debug, proxy => $Proxy ) ;
+($rc, $message) =  $x->check( {tmno => $tmno}, debug => $debug, proxy => $Proxy, download_images => $download_images ) ;
 
 print $rc ? 'ATMOSS Ok. ' : 'ATMOSS b0rked: ', $message, "\n" ; 
      
@@ -67,6 +71,7 @@ sub print_usage () {
         print "$PROGNAME Check of IP Australia ATMOSS service.\n" ;
         print "$PROGNAME Trade Mark Number eg '3'\n" ;
         print "$PROGNAME [-d | --debug]\n";
+        print "$PROGNAME [-D | --download_images]\n";
         print "$PROGNAME [-h | --help]\n";
         print "$PROGNAME [-P | --proxy] name of proxy server. Include :port as a suffix if required eg localhost:3128\n";
         print "$PROGNAME [-A | --account] account to use proxy server\n";

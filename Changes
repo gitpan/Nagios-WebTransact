@@ -3,10 +3,10 @@ Revision history for Perl extension Nagios::WebTransact
 0.01  Fri May 30 15:35:55 2003
 	- original version; created by h2xs 1.19
 
-0.0.2 Correct testing. Try and limp along with no understanding of
+0.02 Correct testing. Try and limp along with no understanding of
       Test::Harness and make test. Rather unsuccessfull.
 
-0.0.3 Since make test runs 
+0.03 Since make test runs 
 	- test.pl and
 	- t/* with verbose=0
 
@@ -16,4 +16,8 @@ what has been done here ie
 	- construct credentials cache with Makefile.PL and 
 	- put all the tests in t/
 
+0.04	Add PREREQ checking to Makefile.PL ..
 
+0.14	Nov 2003
+	- closure generated accessors 
+ 	- add download_images option

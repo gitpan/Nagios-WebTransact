@@ -3,15 +3,13 @@ package Nagios::WebTransact;
 use strict;
 use vars qw($VERSION) ;
 
-$VERSION = '0.03';
+$VERSION = '0.14';
 
 use HTTP::Request::Common qw(GET POST HEAD) ;
 use HTTP::Cookies ;
 use LWP::UserAgent ;
 
 use Carp ;
-
-use vars qw($AUTOLOAD) ;
 
 use constant FALSE	=> 0 ;
 use constant TRUE	=> ! FALSE ;
@@ -38,8 +36,6 @@ sub new {
   # hard to interpret 'not an array ref' messages (from check::make_req) caused
   # by mis spelled or mistaken field names.
 
-  # FIXME consider a pseudo-hash to implement the request record.
-
   &outahere( $urls_ar, 'URL list is not an array reference.' ) if ref $urls_ar ne 'ARRAY' ;
   my @urls = @$urls_ar ;
 
@@ -65,7 +61,26 @@ sub new {
 
   my $class = ref($obj) || $obj ;
 
-  bless { urls => $urls_ar, matches => [] }, $class ;
+  my $accessor_stash_slot = $class . '::' . 'get_urls' ;
+
+  no strict 'refs' ;
+  unless ( ref *$accessor_stash_slot{CODE} eq 'CODE' ) {
+    foreach my $accessor ( qw(urls matches) ) {
+      my $full_name = $class . '::' . $accessor ;
+      *{$full_name} = sub { my $self = shift @_ ;
+                               $self->{$accessor} = shift @_ if @_ ;
+  			     $self->{$accessor}
+  			} ;
+      foreach my $acc_pre (qw(get set)) {
+        $full_name = $class . '::' . $acc_pre . '_' . $accessor ;
+        *{$full_name} = $acc_pre eq 'get' ? sub { my $self = shift @_; $self->{$accessor} } :
+  					  sub { my $self = shift @_; $self->{$accessor} = shift @_ } ;
+      }
+    }
+  }
+
+
+  bless { urls => $urls_ar, matches => [], number_of_images_downloaded => 0 }, $class ;
 
 					# The field urls contains a ref to a list of (hashes)
 					# records representing the web transaction.
@@ -81,16 +96,26 @@ sub new {
 					# will lead to a query_string like
 					# form_name_1=$matches[0] form_name_2=$matches[1] ..
 					# in $self->make_req() by
-					# @matches = $self->get_matches(); and using 0, 1 etc as indices
+					# @matches = $self->matches(); and using 0, 1 etc as indices
 					# of @matches.
+
+  # XXX FIXME
+  # Construct the useragent object and cache it so that the check method can reuse it for
+  # multiple lists of URLs
 
 }
 
 sub check {
   my ($self, $cgi_parm_vals_hr) = @_ ;
 
-  my %defaults = ( cookies => TRUE, debug => TRUE, timeout => 30, agent => AGENT, proxy => {},
-                   fail_if_1 => TRUE ) ;
+  my %defaults = ( cookies	=> TRUE,
+		   debug	=> TRUE,
+		   timeout	=> 30,
+		   agent	=> AGENT,
+		   proxy	=> {},
+		   download_images => FALSE,
+		   indent_level => 0,
+                   fail_if_1	=> TRUE ) ;
 
 					# check semantics.
 					# $fail_if_1  	?	return FAIL if any URL fails
@@ -98,41 +123,47 @@ sub check {
 					#                       (same as return OK if any URL ok)
 
   my %parms = (%defaults, @_) ;
+					# remaining (minus first 2) elts in @_ are the check params such as debug
 
-  my ($res, $req, $ok, $content, $url_r, $resp_string) ;
-  my ($cookie_jar, $ua, $debug) ;
-  
+  my (%downloaded, $ua) ; 
+
+  keys %downloaded = 128 ;
+ 
   $ua = new LWP::UserAgent ;
   $ua->agent($parms{agent}) ;
-
-  $debug = $parms{debug} ;
   $ua->timeout($parms{timeout}) ;
-  $ua->cookie_jar(HTTP::Cookies->new) if $parms{cookies} ;
+  $ua->cookie_jar(HTTP::Cookies->new)
+    if $parms{cookies} ;
+  $ua->proxy(['http', 'ftp'] => $parms{proxy}{server})
+    if exists $parms{proxy}{server} ;
 
-  $ua->proxy(['http', 'ftp'] => $parms{proxy}{server}) if exists $parms{proxy}{server} ;
+  my $debug = $parms{debug} ;
+  my $ok = $parms{fail_if_1} ? TRUE : FALSE ; 
+  my $indent_level = $parms{indent_level} ;
+  my ($resp_string, $res) ;
 
-  $ok = $parms{fail_if_1} ? TRUE : FALSE ; 
-
-  foreach $url_r ( @{ $self->get_urls } ) {
+  foreach my $url_r ( @{ $self->{urls} } ) {
 
     my $url =  $url_r->{Url} ? $url_r->{Url} : &next_url($res, $resp_string) ;
   
-    $req = $self->make_req( $url_r->{Method}, $url, $url_r->{Qs_var}, $url_r->{Qs_fixed}, $cgi_parm_vals_hr ) ;
+    my $req = $self->make_req( $url_r->{Method}, $url, $url_r->{Qs_var}, $url_r->{Qs_fixed}, $cgi_parm_vals_hr ) ;
 
     $req->proxy_authorization_basic( $parms{proxy}{account}, $parms{proxy}{pass} ) if exists $parms{proxy}{account} ;
 
-    print STDERR  "... " . $req->as_string . "\n" if $debug ;
+    print STDERR '   ' x $indent_level, '... ', $req->as_string, "\n" if $debug ;
    
     $res = $ua->request($req) ;
   
-    print STDERR  "... " . $res->as_string . "\n" if $debug ;
-  
+    print STDERR '   ' x $indent_level, '... ', $res->as_string, "\n" if $debug ;
+ 
     if ( $parms{fail_if_1} ) { 
       unless ( $res->is_success or $res->is_redirect) {
         $resp_string = $res->as_string ;
-        $resp_string =~ s#'#_#g ;		# Deal with __Can't__ from LWP. 
+        $resp_string =~ s#'#_#g ;
+						# Deal with __Can't__ from LWP. 
 						# Otherwise notification fails because /bin/sh is called to
 						# printf '$OUTPUT' and sh cannot deal with nested quotes (eg Can't echo ''')
+
         return (FAIL, &error_message( $req->method . ' ' . $req->uri, 'Transaction failed: other than HTTP 200. ', $resp_string )) ;
       }
     } else {
@@ -142,6 +173,7 @@ sub check {
     $resp_string = $res->as_string ;
   
   						# Check that the response is what we expect.
+
     if ( $self->my_match( $url_r->{Exp_Fault}, $resp_string) ) {
       my $fault_ind = $url_r->{Exp_Fault} ;
       my ($bad_stuff) = $resp_string =~ /($fault_ind.*\n.*\n)/ ;
@@ -153,8 +185,17 @@ sub check {
       return(FAIL, &error_message( $req->method . ' ' . $req->uri, " Transaction failed: \"$exp_str\" not in response. ", $resp_string )) ;
     }
 
+
+    if ( $parms{download_images} ) {
+      my ($image_dl_ok, $image_dl_msg, $number_imgs_dl ) = &download_images($res, \%parms, \%downloaded) ;
+      return (FAIL, $image_dl_msg) unless $image_dl_ok ;
+      $self->{number_of_images_downloaded} += $number_imgs_dl ;
+    }
+
   }
-  return ($ok, $ok ? 'Transaction completed Ok.' : 'Transaction failed.') ;
+
+  my $trx_ok = $parms{download_images} ? "Transaction completed Ok - downloaded $self->{number_of_images_downloaded} images." : 'Transaction completed Ok.' ;
+  return ($ok, $ok ? $trx_ok : 'Transaction failed.') ;
 }
   
 sub error_message {
@@ -206,7 +247,7 @@ sub make_req {
 
   my ($req, @query_string, $query_string, @qs_var, @qs_fixed, %name_vals, @nvp) ;
 
-  my @matches = @{ $self->get_matches() } ;
+  my @matches = @{ $self->matches() } ;
 
   @qs_var = @$qs_var_ar ;
   @qs_fixed = @$qs_fixed_ar ;
@@ -308,7 +349,7 @@ sub my_match {
         $found++ ;
       }
     }
-    $self->set_matches( [ @matches ] ) ;
+    $self->matches(\@matches) ;
 
   } else {
     $found = ($str =~ m#$pat#) ;
@@ -318,32 +359,6 @@ sub my_match {
 
   return $found ;
 
-}
-
-sub AUTOLOAD {
-  my ($self, $new_val) = @_ ;
-
-  no strict 'refs' ;
-
-  # generates a bunch of get_ and set_ methods
-
-  return if $AUTOLOAD =~ /::DESTROY$/ ;
-
-  if ( $AUTOLOAD =~ /.*::get_(\w+)/ ) {
-    my $attr_name = $1 ;			# urls | matches
-    *{$AUTOLOAD} = sub { return $_[0]->{$attr_name} } ;
-    return $self->{$attr_name} ;
-  }
-
-  if ( $AUTOLOAD =~ /.*::set_(\w+)/ ) {
-    my $attr_name = $1 ;
-    *{$AUTOLOAD} = sub { $_[0]->{$attr_name} = $_[1]; return  } ;
-    $self->{$attr_name} = $new_val ;
-    return ;
-  }
-
-  croak "No such method: $AUTOLOAD" ;
- 
 }
 
 sub outahere {
@@ -357,6 +372,39 @@ sub outahere {
   $dumper->dumpValue($dumpit) ;
   croak $message ;
 
+}
+
+sub download_images {
+
+  my ($res, $parms_hr, $downloaded_hr)  = @_ ;
+
+  require HTML::LinkExtor ;
+  require URI::URL ;
+  URI::URL->import(qw(url)) ;
+
+  my @imgs = () ;
+
+  my $cb = sub {
+      my($tag, %attr) = @_;
+      return if $tag ne 'img';  # we only look closer at <img ...>
+      push(@imgs, $attr{src});
+  } ;
+
+  my $p = HTML::LinkExtor->new($cb) ;
+  $p->parse($res->as_string) ;
+
+  my $base = $res->base;
+  my @imgs_abs = grep ! $downloaded_hr->{$_}++, map { my $x = url($_, $base)->abs; } @imgs;
+
+  my @img_urls = map { Method => 'GET', Url => $_->as_string, Qs_var => [], Qs_fixed => [], Exp => '.',  Exp_Fault => 'NeverInAnImage' }, @imgs_abs ;
+						# url() returns an array ref containing the abs url and the base.
+  if ( my $number_of_images_not_already_downloaded = scalar @img_urls ) {
+    my $img_trx = __PACKAGE__->new(\@img_urls) ;
+    my %image_dl_parms = (%$parms_hr, fail_if_1 => FALSE, download_images => FALSE, indent_level => 1) ; 
+    return ( $img_trx->check( {}, %image_dl_parms), $number_of_images_not_already_downloaded ) ;
+  } else {
+    return (OK, 'Downloaded all __zero__ images found in ' . $res->base, 0) ;
+  }
 }
 
 1 ;
@@ -580,7 +628,10 @@ B<fail_if_1> if set (the default) causes the check to fail when the first
 web page fails. Clearing this flag is useful if you want to get a bunch of
 pages and return a failure if they B<all> fail.
 
-B<timeout> the default wait time for a response is 30 seconds.
+B<timeout> the default wait time for a response - to a request for B<one> page - is 30 seconds.
+
+B<download_images> get the images found by HTML::LinkExtor in the page, provided those
+images have not already been fetched.
 
 B<CGI_VALUES> is a reference to a hash whose keys are the values used in the
 Qs_var lists. This allows the check method to get the value of these 
@@ -591,24 +642,24 @@ This hash ref is B<required> and must be set to {} if there are B<no> variables.
 
 =head1 BUGS
 
-Probably too many to mention (look at the version), but the greatest defect is that B<you> must
-identify the URLs and the query strings required by the transaction using tools like ethereal or
+=item * B<you> must identify the URLs and the query strings required by the transaction using tools like ethereal or
 by examining the HTML source of the forms.
 
-Other bugs include 
-
-=item * All fields are mandatory (can't neglect Exp_Fault for example)
+=item * All fields are mandatory (can't neglect Exp_Fault for example).
 
 =item * Failing to use the correct format for the URL list can return
 hard to understand errors (eg not an array reference at line ..)
 
-=item * All of the keys (field names) are case sensitive
+=item * Timeout is B<per> page and not for the overall transaction. Further, the timeout for 
+image download is applied independently of the HTML. This effectively doubles the time allowed for
+the transaction to complete.
+
+=item * All of the keys (field names) are case sensitive.
 
 =item * patterns in Exp cannot be nested. 
 
 =item * There can only be one pattern in each element of Exp ie
-          match me (.*) and me (.*) and don't forget me (.*) 
-          does not save three strings.
+match me (.*) and me (.*) and don't forget me (.*) does not save three strings.
 
 =head1 AUTHOR
 
